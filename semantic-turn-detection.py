@@ -1,7 +1,6 @@
-import asyncio
-import aiohttp
 import numpy as np
-from transformers import AutoTokenizer
+from transformers import AutoTokenizer, AutoModelForCausalLM
+import torch
 from typing import Any
 
 
@@ -9,19 +8,21 @@ class EndOfTurnModel:
     HF_MODEL_ID = "HuggingFaceTB/SmolLM2-360M-Instruct"
 
     MAX_HISTORY = 4     # Maximum number of messages to consider in history
-    TIMEOUT_MS = 500    # Timeout for API requests in milliseconds
     DEFAULT_THRESHOLD = 0.03    # Default probability threshold for determining end of turn
 
-    def __init__(self, hostname: str, threshold: float = DEFAULT_THRESHOLD):
-        self.hostname = hostname
+    def __init__(self, threshold: float = DEFAULT_THRESHOLD):
         self.threshold = threshold
-        self.baseurl = f"{self.hostname}/v1/completions"
-
-        # Load the tokenizer for converting messages to the model's input format
+        
+        print(f"Loading model {self.HF_MODEL_ID} for local CPU inference. This may take a while...")
         self.tokenizer = AutoTokenizer.from_pretrained(
             self.HF_MODEL_ID,
             truncation_side="left",  # Truncate from the left if messages exceed max length
         )
+        self.model = AutoModelForCausalLM.from_pretrained(self.HF_MODEL_ID)
+        self.model.to("cpu")  # Ensure model is on CPU
+        self.model.eval()     # Set model to evaluation mode
+        print("Model loaded successfully.")
+        print("\n" + "="*70 + "\n")
 
 
     def _convert_messages_to_chatml(self, messages: list[dict[str, Any]]) -> str:
@@ -58,60 +59,62 @@ class EndOfTurnModel:
         return tokenized_convo
 
 
-    async def fetch_completion(self, prompt_text: str) -> dict[str, Any]:
+    def get_next_token_logprobs(self, prompt_text: str) -> dict[str, float]:
         """
-        Fetches completions from the VLLM server to get log probabilities for the next token.
-
+        Performs local inference to get log probabilities for the next token.
+        
         Args:
-            prompt_text (str): The formatted conversation text (prompt for the model).
-
+            prompt_text (str): The formatted conversation text.
+            
         Returns:
-            dict[str, Any]: The JSON response from the server.
+            dict[str, float]: Dictionary mapping tokens to their log probabilities.
         """
-        payload = {
-            "model": self.HF_MODEL_ID,
-            "prompt": prompt_text,
-            "max_tokens": 1,  # We only need to predict the very next token.
-            "logprobs": 20,   # Request log probabilities for the top N likely next tokens.
-                              # This helps find EOT-related tokens even if they aren't the single most likely.
-            "skip_special_tokens": False, # We need to see special tokens like <|im_end|>
-        }
-        headers = {"Content-Type": "application/json"}
+        inputs = self.tokenizer(prompt_text, return_tensors="pt", add_special_tokens=False).to("cpu")
 
-        client_timeout = aiohttp.ClientTimeout(total=self.TIMEOUT_MS / 1000)
-
-        async with aiohttp.ClientSession(timeout=client_timeout) as session:
-            async with session.post(self.baseurl, headers=headers, json=payload) as response:
-                if response.status != 200:
-                    error_text = await response.text()
-                    print(f"Error from VLLM server: {response.status}, {error_text}")
-                    raise RuntimeError(f"VLLM server returned status {response.status}")
-                return await response.json()
+        with torch.no_grad():
+            outputs = self.model(**inputs)
+        
+        next_token_logits = outputs.logits[0, -1, :]  # Batch size 1, last token position
+        log_softmax_probs = torch.nn.functional.log_softmax(next_token_logits, dim=-1)
+        
+        # Get top N logprobs (e.g., 20)
+        k = 20 
+        top_logprobs_vals, top_logprobs_ids = torch.topk(log_softmax_probs, k)
+        
+        top_logprobs_dict = {}
+        for i in range(k):
+            token_id = top_logprobs_ids[i].item()
+            # Decode the token ID to its string representation
+            token_str = self.tokenizer.decode([token_id]) 
+            logprob_val = top_logprobs_vals[i].item()
+            top_logprobs_dict[token_str] = logprob_val
+            
+        # Directly return the dictionary of token -> logprob
+        return top_logprobs_dict
     
 
     def process_result(
-        self, result: dict[str, Any], target_tokens: list[str] = ["<|im_end|>"]
+        self, top_logprobs: dict[str, float], target_tokens: list[str] = ["<|im_end|>"]
     ) -> tuple[float, str]:
         """
-        Processes the VLLM server's result to find the maximum probability
+        Processes the model's output to find the maximum probability
         among specified target tokens (e.g., EOT markers, punctuation).
 
         Args:
-            result (dict[str, Any]): The JSON response from the VLLM server.
+            top_logprobs (dict[str, float]): Dictionary mapping tokens to their log probabilities.
             target_tokens (list[str], optional): A list of tokens to look for.
-                                                 Defaults to common EOT indicators.
+                                                Defaults to common EOT indicators.
 
         Returns:
             tuple[float, str]: A tuple containing the maximum probability found for any
-                               target token, and the token itself. Returns (0.0, "") if
-                               no target tokens are found or if there's an error.
+                              target token, and the token itself. Returns (0.0, "") if
+                              no target tokens are found or if there's an error.
         """
         try:
-            # Navigate the JSON response to find the log probabilities of the top predicted tokens.
-            # It should look like: {"token1": logprob1, "token2": logprob2, ...}
-            top_logprobs = result["choices"][0]["logprobs"]["top_logprobs"][0]
-            print(f"Top logprobs: {top_logprobs}")
+            token_probs = {token: f"{np.exp(logprob):.4f}" for token, logprob in top_logprobs.items()}
+            print(f"Token probabilities: {token_probs}")
             
+            # Check for target tokens (like <|im_end|>)
             max_prob = 0.0
             best_token = ""
 
@@ -125,14 +128,18 @@ class EndOfTurnModel:
                         max_prob = prob
                         best_token = stripped_token
             
+            # If we found a target token, show its probability
+            if best_token:
+                print(f"Found target token: '{best_token}' with probability: {max_prob:.4f}")
+            
             return max_prob, best_token
 
-        except (KeyError, IndexError, TypeError) as e:
-            print(f"Error processing VLLM result: {type(e).__name__} - {e}. Result: {result}")
+        except (KeyError, TypeError) as e:
+            print(f"Error processing result: {type(e).__name__} - {e}")
             return 0.0, ""
 
 
-    async def predict_eot_prob(self, messages: list[dict[str, Any]]) -> float:
+    def predict_eot_prob(self, messages: list[dict[str, Any]]) -> float:
         """
         Predicts the probability that the current turn is complete.
 
@@ -143,24 +150,25 @@ class EndOfTurnModel:
             float: The probability (0.0 to 1.0) that the turn is complete.
         """
         # Consider only the most recent messages, up to MAX_HISTORY.
-        truncated_messages = messages[-self.MAX_HISTORY :]
+        truncated_messages = messages[-self.MAX_HISTORY:]
 
         # Convert messages to the ChatML string format required by the model.
         text_input = self._convert_messages_to_chatml(truncated_messages)
+    
+        print(f"EOT Input: '...{text_input}'")
 
-        # Fetch model completion (which includes log probabilities for the next token).
-        result = await self.fetch_completion(text_input)
+        # Get log probabilities for the next token
+        top_logprobs = self.get_next_token_logprobs(text_input)
 
         # Process the result to extract the probability of an EOT-indicating token.
-        eot_prob, _ = self.process_result(result)
+        eot_prob, _ = self.process_result(top_logprobs)
 
-        print(f"EOT Input: '{text_input}'")
-        print(f"Predicted EOT Probability: {eot_prob:.4f}")
+        print(f"EOT Probability: {eot_prob:.4f}")
 
         return eot_prob
 
 
-    async def predict_eot(self, messages: list[dict[str, Any]]) -> bool:
+    def predict_eot(self, messages: list[dict[str, Any]]) -> bool:
         """
         Predicts whether the current turn in the conversation is complete.
 
@@ -171,37 +179,38 @@ class EndOfTurnModel:
             bool: True if the turn is predicted to be complete, False otherwise.
         """
         try:
-            eot_prob = await asyncio.wait_for(
-                self.predict_eot_prob(messages),
-                timeout=self.TIMEOUT_MS / 1000,
-            )
+            eot_prob = self.predict_eot_prob(messages)
             return eot_prob >= self.threshold
-        except (asyncio.TimeoutError, aiohttp.ClientError) as e:
-            print(f"EOT prediction failed due to {type(e).__name__}: {str(e)}. Defaulting to True.")
+        except Exception as e:
+            print(f"EOT prediction failed due to error: {str(e)}. Defaulting to True.")
             return True
 
 
-async def main():
-    # Replace with your VLLM server's actual hostname
-    model = EndOfTurnModel(hostname="http://localhost:8000")
+def main():
+    model = EndOfTurnModel()
 
-    # Example conversations
+    # Example 1: Incomplete turn
+    print("\n--- Example 1: Incomplete turn ---")
     conversation1 = [
         {"role": "user", "content": "Hello"},
         {"role": "assistant", "content": "How may I help you today?"},
         {"role": "user", "content": "Can I have two chicken McNuggets and"}
     ]
-    is_eot1 = await model.predict_eot(conversation1)
-    print(f"Conversation 1 - Is EOT? {is_eot1}") # Expected: False
+    is_eot1 = model.predict_eot(conversation1)
+    print(f"Conversation 1 - Is EOT? {is_eot1}")  # Expected: False
+    
+    print("\n" + "="*70 + "\n")
 
+    # Example 2: Complete turn
+    print("--- Example 2: Complete turn ---")
     conversation2 = [
         {"role": "user", "content": "Hello"},
         {"role": "assistant", "content": "How may I help you today?"},
         {"role": "user", "content": "I have a problem with my card."}
     ]
-    is_eot2 = await model.predict_eot(conversation2)
-    print(f"Conversation 2 - Is EOT? {is_eot2}") # Expected: True
+    is_eot2 = model.predict_eot(conversation2)
+    print(f"Conversation 2 - Is EOT? {is_eot2}")  # Expected: True
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
