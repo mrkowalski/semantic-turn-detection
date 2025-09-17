@@ -1,0 +1,64 @@
+config:
+   model_id: google/gemma-3-270m-it
+   #model_id: speakleash/Bielik-1.5B-v3.0-Instruct-FP8-Dynamic
+   eou_tokens:
+            - <end_of_turn>
+            - <|im_end|>
+            - ?
+            - .
+            - !
+   default_eou_token: <end_of_turn>
+   #default_eou_token: <|im_end|>
+   top_k: 20
+   max_history: 4
+   default_threshold: 0.03
+   debug: true
+conversations:
+            -
+              chat:
+                 - Cześć
+                 - Jak mogę Ci dzisiaj pomóc?
+                 - Poproszę dwa razych Chicken McNuggets i
+              eou: false
+            -
+              chat:
+                 - Cześć
+                 - Jak mogę Ci dzisiaj pomóc?
+                 - Mam problem ze swoją kartą.
+              eou: true
+            -
+              chat:
+                 - Cześć
+                 - Jak mogę Ci dzisiaj pomóc?
+                 - Mam problem ze swoją kartą
+              eou: true
+            -
+              chat:
+                 - Dzień dobry
+                 - Jak mogę Ci dzisiaj pomóc?
+                 - kim jest sławosz uznański
+              eou: true
+            - 
+              chat:
+                 - .
+                 - Witam
+                 - kim jest marcin.
+              eou: true
+            - 
+              chat:
+                 - .
+                 - Witam
+                 - kim jest marcin
+              eou: false
+            - 
+              chat:
+                 - .
+                 - Witam
+                 - chciałbym zamówić pizzę
+              eou: true
+            - 
+              chat:
+                 - .
+                 - Witam
+                 - chciałbym zamówić pizzę margarite
+              eou: true
