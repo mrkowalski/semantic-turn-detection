@@ -143,11 +143,11 @@ class EndOfTurnModel:
                               no target tokens are found or if there's an error.
         """
         try:
-            token_probs = {
-                token: f"{np.exp(logprob):.4f}"
-                for token, logprob in top_logprobs.items()
-            }
             if DEBUG:
+                token_probs = {
+                    token: f"{np.exp(logprob):.4f}"
+                    for token, logprob in top_logprobs.items()
+                }
                 print(f"Token probabilities: {token_probs}")
 
             # Check for target tokens (like <|im_end|>)
@@ -206,7 +206,7 @@ class EndOfTurnModel:
 
         return eou_prob
 
-    def predict_eou(self, messages: Sequence[Mapping[str, Any]]) -> bool:
+    def predict_eou(self, messages: Sequence[Mapping[str, Any]]) -> tuple[bool, float]:
         """
         Predicts whether the current turn in the conversation is complete.
 
@@ -217,7 +217,7 @@ class EndOfTurnModel:
             bool: True if the turn is predicted to be complete, False otherwise.
         """
         eou_prob = self.predict_eou_prob(messages)
-        return eou_prob >= self._config.default_threshold
+        return eou_prob >= self._config.default_threshold, eou_prob
 
 
 def main():
@@ -225,9 +225,9 @@ def main():
     model = EndOfTurnModel(data.config)
     start = time.perf_counter_ns()
     for i in range(len(data.conversations)):
-        is_eou = model.predict_eou(data.conversations[i].chat_with_roles())
+        is_eou, prob = model.predict_eou(data.conversations[i].chat_with_roles())
         print(
-            f"{i:03d} - Is EOU? {is_eou} - Correct? {data.conversations[i].eou == is_eou}"
+            f"{i:03d} - Is EOU? {is_eou} - {prob:.4f} - Correct? {data.conversations[i].eou == is_eou} - \"{data.conversations[i].chat[-1]}\""
         )
     end = time.perf_counter_ns()
     print(f"Inference took {(end - start) / len(data.conversations) / 1_000_000:.2f} ms per conversation.")
