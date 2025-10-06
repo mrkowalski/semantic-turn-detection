@@ -16,7 +16,7 @@ This script uses a Small Language Model to predict whether the current turn in a
 Simply run the script directly:
 
 ```bash
-python semantic-turn-detection.py
+uv run semantic-turn-detection.py
 ```
 
 The first time you run the script, it will download the Hugging Face model (`HuggingFaceTB/SmolLM2-360M-Instruct`). This can take some time and requires disk space.
