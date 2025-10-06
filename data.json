@@ -1,17 +1,19 @@
 {
     "config": {
-        "model_id": "speakleash/Bielik-1.5B-v3.0-Instruct-FP8-Dynamic",
+        "model_id": "google/gemma-3-1b-it",
         "eou_tokens": [
             "<end_of_turn>",
             "<|im_end|>",
             "?",
             ".",
-            "!"
+            "!",
+            "\n",
+            "\n\n"
         ],
-        "default_eou_token": 1,
+        "default_eou_token": 0,
         "top_k": 30,
         "max_history": 4,
-        "default_threshold": 0.03
+        "default_threshold": 0.006
     },
     "conversations": [
         {
@@ -28,7 +30,7 @@
                 "Jak mogę Ci dzisiaj pomóc?",
                 "Mam problem ze swoją kartą."
             ],
-            "eou": false
+            "eou": true
         },
         {
             "chat": [
@@ -36,7 +38,7 @@
                 "Jak mogę Ci dzisiaj pomóc?",
                 "Mam problem ze swoją kartą"
             ],
-            "eou": false
+            "eou": true
         },
         {
             "chat": [
@@ -75,6 +77,46 @@
                 ".",
                 "Witam",
                 "chciałbym zamówić pizzę margarite"
+            ],
+            "eou": true
+        },
+        {
+            "chat": [
+                ".",
+                "Proszę podać imię i nazwisko.",
+                "Marcin Kowalski"
+            ],
+            "eou": true
+        },
+        {
+            "chat": [
+                ".",
+                "Proszę podać numer telefonu.",
+                "Marcin Kowalski"
+            ],
+            "eou": false
+        },
+        {
+            "chat": [
+                ".",
+                "Proszę podać numer telefonu.",
+                "123 354"
+            ],
+            "eou": false
+        },
+        {
+            "chat": [
+                ".",
+                "Proszę podać numer telefonu.",
+                "123 354 764"
+            ],
+            "eou": true
+        },
+        {
+            "chat": [
+                ".",
+                "Proszę podać numer telefonu.",
+                "123 354 764."
             ],
             "eou": true
         }
