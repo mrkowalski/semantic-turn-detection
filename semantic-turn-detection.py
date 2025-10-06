@@ -137,7 +137,6 @@ class EndOfTurnModel:
         Args:
             top_logprobs (dict[str, float]): Dictionary mapping tokens to their log probabilities.
             target_tokens (list[str], optional): A list of tokens to look for.
-                                                Defaults to common EOT indicators.
 
         Returns:
             tuple[float, str]: A tuple containing the maximum probability found for any
@@ -157,14 +156,12 @@ class EndOfTurnModel:
             best_token = ""
 
             for token_str, logprob in top_logprobs.items():
-                # The tokenizer might add leading spaces to tokens, so strip them.
-                stripped_token = token_str.strip()
-                if stripped_token in target_tokens:
+                if token_str in target_tokens:
                     # Convert log probability back to probability (exp(logprob)).
                     prob = np.exp(logprob)
                     if prob > max_prob:
                         max_prob = prob
-                        best_token = stripped_token
+                        best_token = token_str
 
             # If we found a target token, show its probability
             if DEBUG and best_token:
