@@ -18,7 +18,6 @@ class Config(BaseModel):
     eou_tokens: list[str]
     default_eou_token: int
     top_k: int
-    max_history: int
     default_threshold: float
 
 
@@ -185,11 +184,9 @@ class EndOfTurnModel:
         Returns:
             float: The probability (0.0 to 1.0) that the turn is complete.
         """
-        # Consider only the most recent messages, up to MAX_HISTORY.
-        truncated_messages = messages[-self._config.max_history :]
 
         # Convert messages to the ChatML string format required by the model.
-        text_input = self._convert_messages_to_chatml(truncated_messages)
+        text_input = self._convert_messages_to_chatml(messages)
 
         if DEBUG:
             print(f"EOT Input: '...{text_input}'")
@@ -217,23 +214,3 @@ class EndOfTurnModel:
         """
         eou_prob = self.predict_eou_prob(messages)
         return eou_prob >= self._config.default_threshold, eou_prob
-
-
-def main():
-    with open("data.json", "r") as f:
-        data = Data.model_validate_json(f.read(), strict=False)
-    model = EndOfTurnModel(data.config)
-    start = time.perf_counter_ns()
-    for i in range(len(data.conversations)):
-        is_eou, prob = model.predict_eou(data.conversations[i].chat_with_roles())
-        print(
-            f'{i:03d} - Is EOU? {is_eou} - {prob:.4f} - Correct? {data.conversations[i].eou == is_eou} - "{data.conversations[i].chat[-1]}"'
-        )
-    end = time.perf_counter_ns()
-    print(
-        f"Inference took {(end - start) / len(data.conversations) / 1_000_000:.2f} ms per conversation."
-    )
-
-
-if __name__ == "__main__":
-    main()

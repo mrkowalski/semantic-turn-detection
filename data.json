@@ -1,6 +1,6 @@
 {
     "config": {
-        "model_id": "google/gemma-3-1b-it",
+        "model_id": "speakleash/Bielik-1.5B-v3.0-Instruct",
         "eou_tokens": [
             "<end_of_turn>",
             "<|im_end|>",
@@ -10,9 +10,8 @@
             "\n",
             "\n\n"
         ],
-        "default_eou_token": 0,
+        "default_eou_token": 1,
         "top_k": 30,
-        "max_history": 4,
         "default_threshold": 0.006
     },
     "conversations": [
